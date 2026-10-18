@@ -29,6 +29,15 @@ with st.sidebar:
     forecast_days = st.number_input(
         "Forecast horizon (trading days)", min_value=1, max_value=252, value=1, step=1
     )
+    st.subheader("Options Expected Move (DTE Method)")
+    options_iv = st.number_input(
+        "Option implied volatility (%)", min_value=0.01, value=27.13, step=0.10, format="%.2f",
+        help="Enter the annualized implied volatility for the option/expiry you want to analyze, as a percentage. This is separate from VXN volatility above."
+    )
+    dte = st.number_input(
+        "Days to expiration (DTE)", min_value=0.0, max_value=3650.0, value=1.0, step=1.0,
+        help="Calendar days remaining until the option expiration."
+    )
     selected_levels = st.multiselect(
         "Confidence intervals",
         options=["50%", "68%", "90%", "95%", "99%"],
@@ -93,12 +102,27 @@ for level in selected_levels:
         }
     )
 
+# Options expected move = underlying price × IV × sqrt(DTE / 365).
+# IV is entered as a percentage and converted to a decimal.
+options_expected_move = spot_price * (options_iv / 100) * np.sqrt(dte / 365)
+rows.append(
+    {
+        "Confidence interval": f"Options EM (DTE {dte:g})",
+        "Z-score": 1.0,
+        "Expected move ($)": options_expected_move,
+        "Expected move (%)": (options_expected_move / spot_price) * 100,
+        "Lower bound ($)": spot_price - options_expected_move,
+        "Upper bound ($)": spot_price + options_expected_move,
+    }
+)
+
 df = pd.DataFrame(rows)
 
-m1, m2, m3 = st.columns(3)
+m1, m2, m3, m4 = st.columns(4)
 m1.metric("QQQ Spot Price", f"${spot_price:,.2f}")
-m2.metric(f"Implied Volatility ({forecast_days} trading day{'s' if forecast_days != 1 else ''}, approx.)", f"{daily_move_pct:.2f}%")
-m3.metric(f"1σ Expected Move ({forecast_days} day{'s' if forecast_days != 1 else ''})", f"±${one_sigma_move:,.2f}")
+m2.metric(f"VXN Daily Volatility ({forecast_days} trading day{'s' if forecast_days != 1 else ''}, approx.)", f"{daily_move_pct:.2f}%")
+m3.metric(f"VXN 1σ Move ({forecast_days} day{'s' if forecast_days != 1 else ''})", f"±${one_sigma_move:,.2f}")
+m4.metric("Options Expected Move (DTE method)", f"±${options_expected_move:,.2f}")
 
 st.subheader("Calculated Price Levels")
 display_df = df.copy()
@@ -165,10 +189,11 @@ st.download_button(
 with st.expander("Method and assumptions"):
     st.markdown(
         r"""
-        - Expected move: S × (σ / 100) × √(t / 252) × z, where S is QQQ spot, σ is annualized VXN volatility in percent, t is the forecast horizon in trading days, and z is the selected confidence-level Z-score.
-        - The app uses the selected trading-days-per-year input as the denominator (normally 252).
+        - VXN confidence-range move: S × (σ / 100) × √(t / 252) × z, where S is QQQ spot, σ is annualized VXN volatility in percent, t is the forecast horizon in trading days, and z is the selected confidence-level Z-score.
+        - Options DTE expected move: underlying price × (option IV / 100) × √(DTE / 365), where option IV is annualized implied volatility entered as a percentage and DTE is calendar days to expiration.
+        - The options DTE method is shown as a one-standard-deviation-style move; it does not apply a confidence-level Z-score.
         - Bounds are calculated as spot price ± expected move.
         - The 90% interval uses a two-sided normal z-score of approximately 1.645.
-        - This is a simplified normal-return estimate. VXN is a Nasdaq-100 volatility index, so applying it directly to QQQ is an approximation. Realized moves can fall outside these ranges.
+        - These are simplified estimates, not guaranteed price boundaries. VXN is a Nasdaq-100 volatility index, while option IV should match the option/expiry being analyzed. Actual moves can fall outside these ranges.
         """
     )
